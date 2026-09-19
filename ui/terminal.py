@@ -7,8 +7,13 @@ from rich.console import Console
 from rich.text import Text
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.document import Document
+from prompt_toolkit.styles import Style
+
+from ui.commands import COMMANDS, handle_command
+from ui.autocomplete import WizCompleter
+from voice.tts import speak, startup_greeting
+from voice.graph import show_voice
+from voice.stt import listen
 
 
 # ==================================================
@@ -113,68 +118,34 @@ FINAL_LOGO = build_final_logo()
 
 
 # ==================================================
-# COMMANDS
-# ==================================================
-
-COMMANDS = [
-    ("/help", "Show available commands"),
-    ("/clear", "Clear the conversation"),
-    ("/status", "Show WIZ status"),
-    ("/about", "About WIZ and its creator"),
-    ("/memory", "Show memory status"),
-    ("/tools", "Show connected tools"),
-    ("/version", "Show WIZ version"),
-    ("/reset", "Restart WIZ"),
-    ("/exit", "Exit WIZ"),
-]
-
-
-# ==================================================
-# AUTOCOMPLETE
-# ==================================================
-
-class WizCompleter(Completer):
-
-    def get_completions(
-        self,
-        document: Document,
-        complete_event,
-    ):
-
-        text = document.text_before_cursor
-
-        # ------------------------------------------
-        # Only activate for slash commands
-        # ------------------------------------------
-
-        if not text.startswith("/"):
-            return
-
-        query = text.lower()
-
-        # ------------------------------------------
-        # Match commands
-        # ------------------------------------------
-
-        for command, description in COMMANDS:
-
-            if command.startswith(query):
-
-                yield Completion(
-                    command,
-                    start_position=-len(text),
-                    display=command,
-                    display_meta=description,
-                )
-
-
-# ==================================================
 # PROMPT SESSION
 # ==================================================
 
+wiz_style = Style.from_dict({
+    # Black autocomplete popup
+    "completion-menu": "bg:#000000",
+
+    # Normal command text — inherit normal terminal color
+    "completion-menu.completion": "bg:#000000 #C9A27E",
+
+    # Selected command
+    "completion-menu.completion.current": "bg:#000000 #FFFFFF",
+
+    # Command description
+    "completion-menu.meta": "bg:#000000 #888888",
+
+    # Description when selected
+    "completion-menu.meta.completion.current": "bg:#000000 #AAAAAA",
+
+    # Scrollbar
+    "scrollbar.background": "bg:#000000",
+    "scrollbar.button": "bg:#333333",
+})
+
 session = PromptSession(
-    completer=WizCompleter(),
+    completer=WizCompleter(COMMANDS),
     complete_while_typing=True,
+    style=wiz_style,
 )
 
 
@@ -521,43 +492,6 @@ def show_header():
 
 
 # ==================================================
-# VOICE GRAPH
-# ==================================================
-
-def make_waveform():
-
-    return "".join(
-        random.choice(
-            WAVE_CHARS[:7]
-        )
-        for _ in range(20)
-    )
-
-
-def show_voice():
-
-    voice = Text()
-
-    voice.append(
-        " " * UI_LEFT_PADDING
-    )
-
-    voice.append(
-        "VOICE  ",
-        style="dim",
-    )
-
-    voice.append(
-        make_waveform(),
-        style=WIZ_COLOR,
-    )
-
-    console.print(voice)
-
-    console.print()
-
-
-# ==================================================
 # COMMAND MENU
 # ==================================================
 
@@ -805,144 +739,6 @@ def reset_wiz():
 
 
 # ==================================================
-# SLASH COMMAND HANDLER
-# ==================================================
-
-def handle_command(
-    command,
-):
-
-    command = command.strip()
-
-    # ----------------------------------------------
-    # Empty slash
-    # ----------------------------------------------
-
-    if command == "/":
-
-        show_command_menu()
-
-        return True
-
-    parts = command.split()
-
-    if not parts:
-        return True
-
-    name = parts[0].lower()
-
-    # ----------------------------------------------
-    # HELP
-    # ----------------------------------------------
-
-    if name == "/help":
-
-        show_command_menu()
-
-        return True
-
-    # ----------------------------------------------
-    # CLEAR
-    # ----------------------------------------------
-
-    if name == "/clear":
-
-        clear_ui()
-
-        return True
-
-    # ----------------------------------------------
-    # STATUS
-    # ----------------------------------------------
-
-    if name == "/status":
-
-        show_status()
-
-        return True
-
-    # ----------------------------------------------
-    # ABOUT
-    # ----------------------------------------------
-
-    if name == "/about":
-
-        show_about()
-
-        return True
-
-    # ----------------------------------------------
-    # MEMORY
-    # ----------------------------------------------
-
-    if name == "/memory":
-
-        show_memory()
-
-        return True
-
-    # ----------------------------------------------
-    # TOOLS
-    # ----------------------------------------------
-
-    if name == "/tools":
-
-        show_tools()
-
-        return True
-
-    # ----------------------------------------------
-    # VERSION
-    # ----------------------------------------------
-
-    if name == "/version":
-
-        show_version()
-
-        return True
-
-    # ----------------------------------------------
-    # RESET
-    # ----------------------------------------------
-
-    if name == "/reset":
-
-        reset_wiz()
-
-        return True
-
-    # ----------------------------------------------
-    # EXIT
-    # ----------------------------------------------
-
-    if name == "/exit":
-
-        return False
-
-    # ----------------------------------------------
-    # UNKNOWN
-    # ----------------------------------------------
-
-    console.print()
-
-    console.print(
-        " " * UI_LEFT_PADDING
-        + f"Unknown command: {name}",
-        style="dim",
-    )
-
-    console.print(
-        " " * UI_LEFT_PADDING
-        + "Type / to see commands.",
-        style="dim",
-    )
-
-    console.print()
-
-    return True
-
-
-# ==================================================
 # USER MESSAGE
 # ==================================================
 
@@ -1060,12 +856,6 @@ def startup():
 
     console.print(
         " " * UI_LEFT_PADDING
-        + "Good evening.",
-        style="bold white",
-    )
-
-    console.print(
-        " " * UI_LEFT_PADDING
         + "WIZ is ready.",
         style="dim",
     )
@@ -1073,6 +863,9 @@ def startup():
     console.print()
 
     show_voice()
+
+    # Voice-only startup greeting. Nothing is printed as the greeting.
+    speak(startup_greeting())
 
 
 # ==================================================
@@ -1138,10 +931,13 @@ def run():
             # Interactive prompt-toolkit input
             # --------------------------------------
 
-            message = session.prompt(
-                " " * UI_LEFT_PADDING
-                + "› "
-            )
+            message = listen()
+
+            if not message:
+                message = session.prompt(
+                    " " * UI_LEFT_PADDING
+                    + "› "
+                )
 
             if not message.strip():
                 continue
@@ -1184,6 +980,9 @@ def run():
                 response,
                 elapsed,
             )
+
+            speak(response)
+            show_voice()
 
     except KeyboardInterrupt:
 
